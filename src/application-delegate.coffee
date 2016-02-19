@@ -196,6 +196,7 @@ class ApplicationDelegate
 
   onDidCompleteDownloadingUpdate: (callback) ->
     outerCallback = (event, message, detail) ->
+
       if message is 'update-available'
         callback(detail)
 
@@ -211,7 +212,6 @@ class ApplicationDelegate
     ipcRenderer.on('message', outerCallback)
     new Disposable ->
       ipcRenderer.removeListener('message', outerCallback)
-
 
   onApplicationMenuCommand: (callback) ->
     outerCallback = (event, args...) ->

@@ -650,6 +650,7 @@ class AtomEnvironment extends Model
         @listenForUpdates()
 
         @registerDefaultTargetForKeymaps()
+<<<<<<< HEAD
 
         @packages.loadPackages()
 
@@ -670,6 +671,28 @@ class AtomEnvironment extends Model
 
         @openInitialEmptyEditorIfNecessary()
 
+=======
+
+        @packages.loadPackages()
+
+        startTime = Date.now()
+        @deserialize(state) if state?
+        @deserializeTimings.atom = Date.now() - startTime
+
+        @document.body.appendChild(@views.getView(@workspace))
+        @backgroundStylesheet?.remove()
+
+        @watchProjectPath()
+
+        @packages.activate()
+        @keymaps.loadUserKeymap()
+        @requireUserInitScript() unless @getLoadSettings().safeMode
+
+        @menu.update()
+
+        @openInitialEmptyEditorIfNecessary()
+
+>>>>>>> master
   serialize: ->
     version: @constructor.version
     project: @project.serialize()
