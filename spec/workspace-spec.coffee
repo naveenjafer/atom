@@ -471,6 +471,27 @@ describe "Workspace", ->
           workspace.open("bar://baz").then (item) ->
             expect(item).toEqual {bar: "bar://baz"}
 
+    it "adds the file to the application's recent documents list", ->
+      spyOn(atom.applicationDelegate, 'addRecentDocument')
+
+      waitsForPromise ->
+        workspace.open()
+
+      runs ->
+        expect(atom.applicationDelegate.addRecentDocument).not.toHaveBeenCalled()
+
+      waitsForPromise ->
+        workspace.open('something://a/url')
+
+      runs ->
+        expect(atom.applicationDelegate.addRecentDocument).not.toHaveBeenCalled()
+
+      waitsForPromise ->
+        workspace.open(__filename)
+
+      runs ->
+        expect(atom.applicationDelegate.addRecentDocument).toHaveBeenCalledWith(__filename)
+
     it "notifies ::onDidAddTextEditor observers", ->
       absolutePath = require.resolve('./fixtures/dir/a')
       newEditorHandler = jasmine.createSpy('newEditorHandler')
@@ -564,6 +585,22 @@ describe "Workspace", ->
           open = -> workspace.open('file1', workspace.getActivePane())
           expect(open).toThrow()
 
+    describe "when the file is already open in pending state", ->
+      it "should terminate the pending state", ->
+        editor = null
+
+        waitsForPromise ->
+          atom.workspace.open('sample.js', pending: true).then (o) -> editor = o
+          
+        runs ->
+          expect(editor.isPending()).toBe true
+          
+        waitsForPromise ->
+          atom.workspace.open('sample.js').then (o) -> editor = o
+          
+        runs ->
+          expect(editor.isPending()).toBe false
+  
   describe "::reopenItem()", ->
     it "opens the uri associated with the last closed pane that isn't currently open", ->
       pane = workspace.getActivePane()
@@ -1511,3 +1548,14 @@ describe "Workspace", ->
 
       atom.workspace.closeActivePaneItemOrEmptyPaneOrWindow()
       expect(atom.close).toHaveBeenCalled()
+
+  describe "when the core.allowPendingPaneItems option is falsey", ->
+    it "does not open item with `pending: true` option as pending", ->
+      editor = null
+      atom.config.set('core.allowPendingPaneItems', false)
+
+      waitsForPromise ->
+        atom.workspace.open('sample.js', pending: true).then (o) -> editor = o
+
+      runs ->
+        expect(editor.isPending()).toBeFalsy()

@@ -30,13 +30,13 @@ class AutoUpdateManager
     if process.platform is 'win32'
       autoUpdater = require './auto-updater-win32'
     else
-      autoUpdater = require 'auto-updater'
+      {autoUpdater} = require 'electron'
 
     autoUpdater.on 'error', (event, message) =>
       @setState(ErrorState)
       console.error "Error Downloading Update: #{message}"
 
-    autoUpdater.setFeedUrl @feedUrl
+    autoUpdater.setFeedURL @feedUrl
 
     autoUpdater.on 'checking-for-update', =>
       @setState(CheckingState)
@@ -117,7 +117,7 @@ class AutoUpdateManager
 
   onUpdateNotAvailable: =>
     autoUpdater.removeListener 'error', @onUpdateError
-    dialog = require 'dialog'
+    {dialog} = require 'electron'
     dialog.showMessageBox
       type: 'info'
       buttons: ['OK']
@@ -128,7 +128,7 @@ class AutoUpdateManager
 
   onUpdateError: (event, message) =>
     autoUpdater.removeListener 'update-not-available', @onUpdateNotAvailable
-    dialog = require 'dialog'
+    {dialog} = require 'electron'
     dialog.showMessageBox
       type: 'warning'
       buttons: ['OK']
