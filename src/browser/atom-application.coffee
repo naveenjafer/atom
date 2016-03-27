@@ -85,16 +85,16 @@ class AtomApplication
     else
       @loadState(options) or @openPath(options)
 
-  openWithOptions: ({pathsToOpen, executedFrom, urlsToOpen, test, pidToKillWhenClosed, devMode, safeMode, newWindow, logFile, profileStartup, timeout, clearWindowState}) ->
+  openWithOptions: ({initialPaths, pathsToOpen, executedFrom, urlsToOpen, test, pidToKillWhenClosed, devMode, safeMode, newWindow, logFile, profileStartup, timeout, clearWindowState, addToLastWindow, env}) ->
     if test
-      @runTests({headless: true, devMode, @resourcePath, executedFrom, pathsToOpen, logFile, timeout})
+      @runTests({headless: true, devMode, @resourcePath, executedFrom, pathsToOpen, logFile, timeout, env})
     else if pathsToOpen.length > 0
-      @openPaths({pathsToOpen, executedFrom, pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, clearWindowState})
+      @openPaths({initialPaths, pathsToOpen, executedFrom, pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, clearWindowState, addToLastWindow, env})
     else if urlsToOpen.length > 0
-      @openUrl({urlToOpen, devMode, safeMode}) for urlToOpen in urlsToOpen
+      @openUrl({urlToOpen, devMode, safeMode, env}) for urlToOpen in urlsToOpen
     else
       # Always open a editor window if this is the first instance of Atom.
-      @openPath({pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, clearWindowState})
+      @openPath({initialPaths, pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, clearWindowState, addToLastWindow, env})
 
   # Public: Removes the {AtomWindow} from the global window list.
   removeWindow: (window) ->
@@ -134,7 +134,8 @@ class AtomApplication
     @deleteSocketFile()
     server = net.createServer (connection) =>
       connection.on 'data', (data) =>
-        @openWithOptions(JSON.parse(data))
+        options = JSON.parse(data)
+        @openWithOptions(options)
 
     server.listen @socketPath
     server.on 'error', (error) -> console.error 'Application server failed', error
@@ -175,7 +176,6 @@ class AtomApplication
 
     @on 'application:open-documentation', -> shell.openExternal('https://atom.io/docs/latest/?app')
     @on 'application:open-discussions', -> shell.openExternal('https://discuss.atom.io')
-    @on 'application:open-roadmap', -> shell.openExternal('https://atom.io/roadmap?app')
     @on 'application:open-faq', -> shell.openExternal('https://atom.io/faq')
     @on 'application:open-terms-of-use', -> shell.openExternal('https://atom.io/terms')
     @on 'application:report-issue', -> shell.openExternal('https://github.com/atom/atom/blob/master/CONTRIBUTING.md#submitting-issues')
@@ -305,6 +305,15 @@ class AtomApplication
     ipcMain.on 'execute-javascript-in-dev-tools', (event, code) ->
       event.sender.devToolsWebContents?.executeJavaScript(code)
 
+    ipcMain.on 'check-for-update', =>
+      @autoUpdateManager.check()
+
+    ipcMain.on 'get-auto-update-manager-state', (event) =>
+      event.returnValue = @autoUpdateManager.getState()
+
+    ipcMain.on 'execute-javascript-in-dev-tools', (event, code) ->
+      event.sender.devToolsWebContents?.executeJavaScript(code)
+
   setupDockMenu: ->
     if process.platform is 'darwin'
       dockMenu = Menu.buildFromTemplate [
@@ -409,8 +418,9 @@ class AtomApplication
   #   :safeMode - Boolean to control the opened window's safe mode.
   #   :profileStartup - Boolean to control creating a profile of the startup time.
   #   :window - {AtomWindow} to open file paths in.
-  openPath: ({pathToOpen, pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, window, clearWindowState} = {}) ->
-    @openPaths({pathsToOpen: [pathToOpen], pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, window, clearWindowState})
+  #   :addToLastWindow - Boolean of whether this should be opened in last focused window.
+  openPath: ({initialPaths, pathToOpen, pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, window, clearWindowState, addToLastWindow, env} = {}) ->
+    @openPaths({initialPaths, pathsToOpen: [pathToOpen], pidToKillWhenClosed, newWindow, devMode, safeMode, profileStartup, window, clearWindowState, addToLastWindow, env})
 
   # Public: Opens multiple paths, in existing windows if possible.
   #
@@ -422,11 +432,12 @@ class AtomApplication
   #   :safeMode - Boolean to control the opened window's safe mode.
   #   :windowDimensions - Object with height and width keys.
   #   :window - {AtomWindow} to open file paths in.
-  openPaths: ({pathsToOpen, executedFrom, pidToKillWhenClosed, newWindow, devMode, safeMode, windowDimensions, profileStartup, window, clearWindowState}={}) ->
+  #   :addToLastWindow - Boolean of whether this should be opened in last focused window.
+  openPaths: ({initialPaths, pathsToOpen, executedFrom, pidToKillWhenClosed, newWindow, devMode, safeMode, windowDimensions, profileStartup, window, clearWindowState, addToLastWindow, env}={}) ->
     devMode = Boolean(devMode)
     safeMode = Boolean(safeMode)
     clearWindowState = Boolean(clearWindowState)
-    locationsToOpen = (@locationForPathToOpen(pathToOpen, executedFrom) for pathToOpen in pathsToOpen)
+    locationsToOpen = (@locationForPathToOpen(pathToOpen, executedFrom, addToLastWindow) for pathToOpen in pathsToOpen)
     pathsToOpen = (locationToOpen.pathToOpen for locationToOpen in locationsToOpen)
 
     unless pidToKillWhenClosed or newWindow
@@ -435,6 +446,7 @@ class AtomApplication
       unless existingWindow?
         if currentWindow = window ? @lastFocusedWindow
           existingWindow = currentWindow if (
+            addToLastWindow or
             currentWindow.devMode is devMode and
             (
               stats.every((stat) -> stat.isFile?()) or
@@ -458,7 +470,7 @@ class AtomApplication
       windowInitializationScript ?= require.resolve('../initialize-application-window')
       resourcePath ?= @resourcePath
       windowDimensions ?= @getDimensionsForNewWindow()
-      openedWindow = new AtomWindow({locationsToOpen, windowInitializationScript, resourcePath, devMode, safeMode, windowDimensions, profileStartup, clearWindowState})
+      openedWindow = new AtomWindow({initialPaths, locationsToOpen, windowInitializationScript, resourcePath, devMode, safeMode, windowDimensions, profileStartup, clearWindowState, env})
 
     if pidToKillWhenClosed?
       @pidsToOpenWindows[pidToKillWhenClosed] = openedWindow
@@ -501,7 +513,8 @@ class AtomApplication
     if (states = @storageFolder.load('application.json'))?.length > 0
       for state in states
         @openWithOptions(_.extend(options, {
-          pathsToOpen: state.initialPaths
+          initialPaths: state.initialPaths
+          pathsToOpen: state.initialPaths.filter (directoryPath) -> fs.isDirectorySync(directoryPath)
           urlsToOpen: []
           devMode: @devMode
           safeMode: @safeMode
@@ -520,7 +533,7 @@ class AtomApplication
   #   :urlToOpen - The atom:// url to open.
   #   :devMode - Boolean to control the opened window's dev mode.
   #   :safeMode - Boolean to control the opened window's safe mode.
-  openUrl: ({urlToOpen, devMode, safeMode}) ->
+  openUrl: ({urlToOpen, devMode, safeMode, env}) ->
     unless @packages?
       PackageManager = require '../package-manager'
       @packages = new PackageManager
@@ -535,7 +548,7 @@ class AtomApplication
         packagePath = @packages.resolvePackagePath(packageName)
         windowInitializationScript = path.resolve(packagePath, pack.urlMain)
         windowDimensions = @getDimensionsForNewWindow()
-        new AtomWindow({windowInitializationScript, @resourcePath, devMode, safeMode, urlToOpen, windowDimensions})
+        new AtomWindow({windowInitializationScript, @resourcePath, devMode, safeMode, urlToOpen, windowDimensions, env})
       else
         console.log "Package '#{pack.name}' does not have a url main: #{urlToOpen}"
     else
@@ -550,7 +563,7 @@ class AtomApplication
   #   :specPath - The directory to load specs from.
   #   :safeMode - A Boolean that, if true, won't run specs from ~/.atom/packages
   #               and ~/.atom/dev/packages, defaults to false.
-  runTests: ({headless, resourcePath, executedFrom, pathsToOpen, logFile, safeMode, timeout}) ->
+  runTests: ({headless, resourcePath, executedFrom, pathsToOpen, logFile, safeMode, timeout, env}) ->
     if resourcePath isnt @resourcePath and not fs.existsSync(resourcePath)
       resourcePath = @resourcePath
 
@@ -580,7 +593,7 @@ class AtomApplication
     devMode = true
     isSpec = true
     safeMode ?= false
-    new AtomWindow({windowInitializationScript, resourcePath, headless, isSpec, devMode, testRunnerPath, legacyTestRunnerPath, testPaths, logFile, safeMode})
+    new AtomWindow({windowInitializationScript, resourcePath, headless, isSpec, devMode, testRunnerPath, legacyTestRunnerPath, testPaths, logFile, safeMode, env})
 
   resolveTestRunnerPath: (testPath) ->
     FindParentDir ?= require 'find-parent-dir'
@@ -603,7 +616,7 @@ class AtomApplication
     catch error
       require.resolve(path.resolve(__dirname, '..', '..', 'spec', 'jasmine-test-runner'))
 
-  locationForPathToOpen: (pathToOpen, executedFrom='') ->
+  locationForPathToOpen: (pathToOpen, executedFrom='', forceAddToWindow) ->
     return {pathToOpen} unless pathToOpen
 
     pathToOpen = pathToOpen.replace(/[:\s]+$/, '')
@@ -619,7 +632,7 @@ class AtomApplication
     unless url.parse(pathToOpen).protocol?
       pathToOpen = path.resolve(executedFrom, fs.normalize(pathToOpen))
 
-    {pathToOpen, initialLine, initialColumn}
+    {pathToOpen, initialLine, initialColumn, forceAddToWindow}
 
   # Opens a native dialog to prompt the user for a path.
   #
